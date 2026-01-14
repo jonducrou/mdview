@@ -61,12 +61,14 @@ struct DefaultAppHandler {
 // MARK: - Markdown Parser (lightweight, no dependencies)
 struct MarkdownParser {
     static func toHTML(_ markdown: String) -> String {
-        var html = markdown
+        // First, extract and process tables before escaping
+        var processedMarkdown = markdown
+        processedMarkdown = processTables(processedMarkdown)
 
-        // Escape HTML entities first
-        html = html.replacingOccurrences(of: "&", with: "&amp;")
-        html = html.replacingOccurrences(of: "<", with: "&lt;")
-        html = html.replacingOccurrences(of: ">", with: "&gt;")
+        var html = processedMarkdown
+
+        // Escape HTML entities (but not in already-processed table HTML)
+        html = escapeHTMLOutsideTags(html)
 
         // Code blocks (fenced) - must be done before other processing
         html = html.replacingOccurrences(
@@ -120,13 +122,118 @@ struct MarkdownParser {
             let trimmed = block.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { return "" }
             if trimmed.hasPrefix("<h") || trimmed.hasPrefix("<ul") || trimmed.hasPrefix("<ol") ||
-               trimmed.hasPrefix("<pre") || trimmed.hasPrefix("<blockquote") || trimmed.hasPrefix("<hr") {
+               trimmed.hasPrefix("<pre") || trimmed.hasPrefix("<blockquote") || trimmed.hasPrefix("<hr") ||
+               trimmed.hasPrefix("<table") {
                 return trimmed
             }
             return "<p>\(trimmed.replacingOccurrences(of: "\n", with: "<br>"))</p>"
         }.joined(separator: "\n")
 
         return html
+    }
+
+    static func processTables(_ markdown: String) -> String {
+        var result = markdown
+        let lines = markdown.components(separatedBy: "\n")
+        var i = 0
+        var tableRanges: [(start: Int, end: Int, html: String)] = []
+
+        while i < lines.count {
+            // Check if this line looks like a table header (contains |)
+            if lines[i].contains("|") && i + 1 < lines.count {
+                let headerLine = lines[i]
+                let separatorLine = lines[i + 1]
+
+                // Check if next line is a separator (contains | and -)
+                if separatorLine.contains("|") && separatorLine.contains("-") {
+                    // Found a table, collect all rows
+                    var tableLines: [String] = [headerLine, separatorLine]
+                    var j = i + 2
+                    while j < lines.count && lines[j].contains("|") {
+                        tableLines.append(lines[j])
+                        j += 1
+                    }
+
+                    // Convert table to HTML
+                    let tableHTML = convertTableToHTML(tableLines)
+                    tableRanges.append((start: i, end: j - 1, html: tableHTML))
+                    i = j
+                    continue
+                }
+            }
+            i += 1
+        }
+
+        // Replace table sections with HTML (in reverse to preserve indices)
+        for range in tableRanges.reversed() {
+            var newLines = lines
+            let replaceRange = range.start...range.end
+            newLines.removeSubrange(replaceRange)
+            newLines.insert(range.html, at: range.start)
+            result = newLines.joined(separator: "\n")
+        }
+
+        return result
+    }
+
+    static func convertTableToHTML(_ lines: [String]) -> String {
+        guard lines.count >= 2 else { return lines.joined(separator: "\n") }
+
+        func parseCells(_ line: String) -> [String] {
+            var cells = line.split(separator: "|", omittingEmptySubsequences: false).map { String($0).trimmingCharacters(in: .whitespaces) }
+            // Remove empty first/last if line starts/ends with |
+            if cells.first?.isEmpty == true { cells.removeFirst() }
+            if cells.last?.isEmpty == true { cells.removeLast() }
+            return cells
+        }
+
+        let headerCells = parseCells(lines[0])
+        // Skip separator line (lines[1])
+        let bodyRows = lines.dropFirst(2).map { parseCells($0) }
+
+        var html = "<table>\n<thead>\n<tr>"
+        for cell in headerCells {
+            html += "<th>\(cell)</th>"
+        }
+        html += "</tr>\n</thead>\n<tbody>\n"
+
+        for row in bodyRows {
+            html += "<tr>"
+            for cell in row {
+                html += "<td>\(cell)</td>"
+            }
+            html += "</tr>\n"
+        }
+
+        html += "</tbody>\n</table>"
+        return html
+    }
+
+    static func escapeHTMLOutsideTags(_ text: String) -> String {
+        // Simple approach: escape &, <, > but preserve existing HTML tags from tables
+        var result = ""
+        var inTag = false
+
+        for char in text {
+            if char == "<" && !inTag {
+                // Check if this looks like our generated HTML tag
+                inTag = true
+                result.append(char)
+            } else if char == ">" && inTag {
+                inTag = false
+                result.append(char)
+            } else if inTag {
+                result.append(char)
+            } else {
+                switch char {
+                case "&": result.append("&amp;")
+                case "<": result.append("&lt;")
+                case ">": result.append("&gt;")
+                default: result.append(char)
+                }
+            }
+        }
+        return result
     }
 }
 
@@ -186,6 +293,28 @@ ul, ol { padding-left: 2em; margin: 0 0 16px 0; }
 li { margin: 4px 0; }
 hr { height: 2px; background: #d0d7de; border: 0; margin: 24px 0; }
 img { max-width: 100%; height: auto; }
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0 0 16px 0;
+    overflow-x: auto;
+    display: block;
+}
+th, td {
+    border: 1px solid #d0d7de;
+    padding: 8px 12px;
+    text-align: left;
+}
+th {
+    background: #f6f8fa;
+    font-weight: 600;
+}
+tr:nth-child(even) { background: #f6f8fa; }
+@media (prefers-color-scheme: dark) {
+    th, td { border-color: #30363d; }
+    th { background: #161b22; }
+    tr:nth-child(even) { background: #161b22; }
+}
 """
 
 // MARK: - App Delegate
