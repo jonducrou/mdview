@@ -438,8 +438,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let fullHTML = """
         <!DOCTYPE html>
         <html>
-        <head><meta charset="utf-8"><style>\(css)</style></head>
+        <head>
+        <meta charset="utf-8">
+        <style>\(css)</style>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+        </head>
         <body>\(html)</body>
+        <script>hljs.highlightAll();</script>
         </html>
         """
 

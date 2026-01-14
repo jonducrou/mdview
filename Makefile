@@ -18,6 +18,7 @@ bundle: build
 install: bundle
 	cp -r $(BUNDLE) /Applications/
 	codesign --force --deep --sign - /Applications/$(BUNDLE)
+	xattr -cr /Applications/$(BUNDLE)
 	@echo "Installed to /Applications/$(BUNDLE)"
 	@echo "You can now set MDView as default app for .md files"
 
