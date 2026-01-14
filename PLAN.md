@@ -24,10 +24,11 @@ A lightweight, native macOS Markdown viewer focused on speed and simplicity.
 - [x] File opening (menu, command line, file association)
 - [x] Proper .app bundle with Info.plist
 - [x] Makefile for build/install
+- [x] Table support in Markdown parser
+- [x] File watching for auto-reload on save
+- [x] Prompt to set as default app for .md files
 
 ## Future Enhancements (if needed)
 
-- [ ] File watching for auto-reload on save
-- [ ] Table support in Markdown parser
 - [ ] Print support
 - [ ] Syntax highlighting in code blocks

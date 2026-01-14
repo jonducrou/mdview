@@ -5,9 +5,10 @@ A lightweight, fast Markdown viewer for macOS.
 ## Features
 
 - Native Swift/AppKit app
-- GitHub-flavored Markdown styling
+- GitHub-flavored Markdown styling (including tables)
 - Dark mode support
 - Fast startup and rendering
+- Auto-reload on file save
 - No external dependencies
 
 ## Installation
