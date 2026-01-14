@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+MDView.app/
+*.xcodeproj/
+DerivedData/
+.DS_Store
+test.md
