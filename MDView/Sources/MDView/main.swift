@@ -133,47 +133,50 @@ struct MarkdownParser {
     }
 
     static func processTables(_ markdown: String) -> String {
-        var result = markdown
-        let lines = markdown.components(separatedBy: "\n")
+        var lines = markdown.components(separatedBy: "\n")
         var i = 0
-        var tableRanges: [(start: Int, end: Int, html: String)] = []
 
         while i < lines.count {
-            // Check if this line looks like a table header (contains |)
-            if lines[i].contains("|") && i + 1 < lines.count {
-                let headerLine = lines[i]
-                let separatorLine = lines[i + 1]
+            // Check if this line looks like a table row (contains |)
+            let line = lines[i].trimmingCharacters(in: .whitespaces)
+            if line.contains("|") && i + 1 < lines.count {
+                let nextLine = lines[i + 1].trimmingCharacters(in: .whitespaces)
 
-                // Check if next line is a separator (contains | and -)
-                if separatorLine.contains("|") && separatorLine.contains("-") {
+                // Check if next line is a separator (contains | and - and mostly dashes/pipes/colons)
+                let isSeparator = nextLine.contains("|") && nextLine.contains("-") &&
+                    nextLine.replacingOccurrences(of: "|", with: "")
+                           .replacingOccurrences(of: "-", with: "")
+                           .replacingOccurrences(of: ":", with: "")
+                           .replacingOccurrences(of: " ", with: "").isEmpty
+
+                if isSeparator {
                     // Found a table, collect all rows
-                    var tableLines: [String] = [headerLine, separatorLine]
+                    var tableLines: [String] = [line, nextLine]
                     var j = i + 2
-                    while j < lines.count && lines[j].contains("|") {
-                        tableLines.append(lines[j])
-                        j += 1
+                    while j < lines.count {
+                        let rowLine = lines[j].trimmingCharacters(in: .whitespaces)
+                        if rowLine.contains("|") && !rowLine.isEmpty {
+                            tableLines.append(rowLine)
+                            j += 1
+                        } else {
+                            break
+                        }
                     }
 
-                    // Convert table to HTML
+                    // Convert table to HTML and replace lines
                     let tableHTML = convertTableToHTML(tableLines)
-                    tableRanges.append((start: i, end: j - 1, html: tableHTML))
-                    i = j
+                    let numLinesToRemove = j - i
+                    lines.removeSubrange(i..<j)
+                    lines.insert(tableHTML, at: i)
+                    // Don't increment i, process next line after inserted HTML
+                    i += 1
                     continue
                 }
             }
             i += 1
         }
 
-        // Replace table sections with HTML (in reverse to preserve indices)
-        for range in tableRanges.reversed() {
-            var newLines = lines
-            let replaceRange = range.start...range.end
-            newLines.removeSubrange(replaceRange)
-            newLines.insert(range.html, at: range.start)
-            result = newLines.joined(separator: "\n")
-        }
-
-        return result
+        return lines.joined(separator: "\n")
     }
 
     static func convertTableToHTML(_ lines: [String]) -> String {
