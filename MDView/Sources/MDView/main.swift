@@ -193,19 +193,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var webView: WKWebView!
     var currentFile: URL?
+    var pendingURL: URL?  // For files opened before app is ready
+    var isReady = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupWindow()
         setupWebView()
         setupMenus()
+        isReady = true
 
-        // Check for file argument
-        let args = CommandLine.arguments
-        if args.count > 1 {
-            let filePath = args[1]
-            loadFile(URL(fileURLWithPath: filePath))
+        // Load pending file if opened via file association
+        if let url = pendingURL {
+            pendingURL = nil
+            loadFile(url)
         } else {
-            showWelcome()
+            // Check for file argument
+            let args = CommandLine.arguments
+            if args.count > 1 {
+                let filePath = args[1]
+                loadFile(URL(fileURLWithPath: filePath))
+            } else {
+                showWelcome()
+            }
         }
 
         // Ask to be default (only once, on first launch)
@@ -333,8 +342,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        if let url = urls.first {
+        guard let url = urls.first else { return }
+        if isReady {
             loadFile(url)
+        } else {
+            pendingURL = url
         }
     }
 
