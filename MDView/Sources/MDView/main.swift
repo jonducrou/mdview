@@ -324,6 +324,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var currentFile: URL?
     var pendingURL: URL?  // For files opened before app is ready
     var isReady = false
+    var fileWatcher: DispatchSourceFileSystemObject?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupWindow()
@@ -440,6 +441,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         """
 
         webView.loadHTMLString(fullHTML, baseURL: url.deletingLastPathComponent())
+        watchFile(url)
+    }
+
+    func watchFile(_ url: URL) {
+        // Stop any existing watcher
+        fileWatcher?.cancel()
+        fileWatcher = nil
+
+        let fd = open(url.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .rename],
+            queue: .main
+        )
+
+        source.setEventHandler { [weak self] in
+            // Small delay to let file finish writing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self?.reloadDocument()
+            }
+        }
+
+        source.setCancelHandler {
+            close(fd)
+        }
+
+        source.resume()
+        fileWatcher = source
     }
 
     func showWelcome() {
