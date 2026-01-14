@@ -1,5 +1,62 @@
 import AppKit
 import WebKit
+import UniformTypeIdentifiers
+
+// MARK: - Default App Handler
+struct DefaultAppHandler {
+    static let bundleID = "com.local.mdview"
+    static let askedKey = "HasAskedToBeDefault"
+
+    static func isDefault() -> Bool {
+        guard let currentHandler = LSCopyDefaultRoleHandlerForContentType(
+            "net.daringfireball.markdown" as CFString,
+            .viewer
+        )?.takeRetainedValue() as String? else {
+            return false
+        }
+        return currentHandler.lowercased() == bundleID.lowercased()
+    }
+
+    static func setAsDefault() {
+        LSSetDefaultRoleHandlerForContentType(
+            "net.daringfireball.markdown" as CFString,
+            .viewer,
+            bundleID as CFString
+        )
+        // Also set for .md extension via public.data
+        LSSetDefaultRoleHandlerForContentType(
+            "public.plain-text" as CFString,
+            .viewer,
+            bundleID as CFString
+        )
+    }
+
+    static func hasAskedBefore() -> Bool {
+        UserDefaults.standard.bool(forKey: askedKey)
+    }
+
+    static func markAsAsked() {
+        UserDefaults.standard.set(true, forKey: askedKey)
+    }
+
+    static func promptIfNeeded() {
+        guard !isDefault() && !hasAskedBefore() else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Set MDView as Default?"
+        alert.informativeText = "Would you like to set MDView as the default app for opening Markdown files?"
+        alert.addButton(withTitle: "Yes, Set as Default")
+        alert.addButton(withTitle: "No Thanks")
+        alert.alertStyle = .informational
+
+        let response = alert.runModal()
+        markAsAsked()
+
+        if response == .alertFirstButtonReturn {
+            setAsDefault()
+        }
+    }
+}
 
 // MARK: - Markdown Parser (lightweight, no dependencies)
 struct MarkdownParser {
@@ -149,6 +206,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             loadFile(URL(fileURLWithPath: filePath))
         } else {
             showWelcome()
+        }
+
+        // Ask to be default (only once, on first launch)
+        DispatchQueue.main.async {
+            DefaultAppHandler.promptIfNeeded()
         }
     }
 
