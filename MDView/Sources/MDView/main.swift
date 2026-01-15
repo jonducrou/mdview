@@ -320,49 +320,24 @@ tr:nth-child(even) { background: #f6f8fa; }
 }
 """
 
-// MARK: - App Delegate
-class AppDelegate: NSObject, NSApplicationDelegate {
-    var window: NSWindow!
-    var webView: WKWebView!
+// MARK: - Document Window (supports multiple windows)
+class DocumentWindow: NSObject, NSWindowDelegate {
+    let window: NSWindow
+    let webView: WKWebView
     var currentFile: URL?
-    var pendingURL: URL?  // For files opened before app is ready
-    var isReady = false
+    var fileDescriptor: Int32 = -1
     var fileWatcher: DispatchSourceFileSystemObject?
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        setupWindow()
-        setupWebView()
-        setupMenus()
-        isReady = true
-
-        // Load pending file if opened via file association
-        if let url = pendingURL {
-            pendingURL = nil
-            loadFile(url)
-        } else {
-            // Check for file argument
-            let args = CommandLine.arguments
-            if args.count > 1 {
-                let filePath = args[1]
-                loadFile(URL(fileURLWithPath: filePath))
-            } else {
-                showWelcome()
-            }
-        }
-
-        // Ask to be default (only once, on first launch)
-        DispatchQueue.main.async {
-            DefaultAppHandler.promptIfNeeded()
-        }
-    }
-
-    func setupWindow() {
+    override init() {
         let screenRect = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
         let windowWidth: CGFloat = min(1000, screenRect.width * 0.7)
         let windowHeight: CGFloat = min(800, screenRect.height * 0.8)
+
+        // Offset each new window slightly
+        let offset = CGFloat(AppDelegate.shared.windows.count * 30)
         let windowRect = NSRect(
-            x: (screenRect.width - windowWidth) / 2 + screenRect.minX,
-            y: (screenRect.height - windowHeight) / 2 + screenRect.minY,
+            x: (screenRect.width - windowWidth) / 2 + screenRect.minX + offset,
+            y: (screenRect.height - windowHeight) / 2 + screenRect.minY - offset,
             width: windowWidth,
             height: windowHeight
         )
@@ -375,14 +350,167 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "MDView"
         window.minSize = NSSize(width: 400, height: 300)
+
+        let config = WKWebViewConfiguration()
+        webView = WKWebView(frame: .zero, configuration: config)
+        webView.autoresizingMask = [.width, .height]
+
+        super.init()
+
+        window.delegate = self
+        window.contentView?.addSubview(webView)
+        webView.frame = window.contentView!.bounds
+        window.makeKeyAndOrderFront(nil)
     }
 
-    func setupWebView() {
-        let config = WKWebViewConfiguration()
-        webView = WKWebView(frame: window.contentView!.bounds, configuration: config)
-        webView.autoresizingMask = [.width, .height]
-        window.contentView?.addSubview(webView)
-        window.makeKeyAndOrderFront(nil)
+    func loadFile(_ url: URL) {
+        currentFile = url
+        window.title = "MDView - \(url.lastPathComponent)"
+
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            showError("Could not read file")
+            return
+        }
+
+        let html = MarkdownParser.toHTML(content)
+        let fullHTML = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <style>\(css)</style>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+        </head>
+        <body>\(html)</body>
+        <script>hljs.highlightAll();</script>
+        </html>
+        """
+
+        webView.loadHTMLString(fullHTML, baseURL: url.deletingLastPathComponent())
+        startWatching(url)
+    }
+
+    func startWatching(_ url: URL) {
+        stopWatching()
+
+        fileDescriptor = Darwin.open(url.path, O_EVTONLY)
+        guard fileDescriptor >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fileDescriptor,
+            eventMask: [.write, .extend, .attrib, .rename],
+            queue: .main
+        )
+
+        source.setEventHandler { [weak self] in
+            guard let self = self, let file = self.currentFile else { return }
+            // Debounce: wait for file to finish writing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                self.loadFile(file)
+            }
+        }
+
+        source.setCancelHandler { [weak self] in
+            if let fd = self?.fileDescriptor, fd >= 0 {
+                Darwin.close(fd)
+            }
+            self?.fileDescriptor = -1
+        }
+
+        source.resume()
+        fileWatcher = source
+    }
+
+    func stopWatching() {
+        fileWatcher?.cancel()
+        fileWatcher = nil
+    }
+
+    func reload() {
+        if let file = currentFile {
+            loadFile(file)
+        }
+    }
+
+    func showWelcome() {
+        let html = """
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"><style>\(css)</style></head>
+        <body>
+        <h1>MDView</h1>
+        <p>A lightweight Markdown viewer.</p>
+        <p>Use <strong>File → Open</strong> or <code>Cmd+O</code> to open a Markdown file.</p>
+        <p>You can also open files from the command line:</p>
+        <pre><code>open -a MDView file.md</code></pre>
+        </body>
+        </html>
+        """
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+
+    func showError(_ message: String) {
+        let html = """
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"><style>\(css)</style></head>
+        <body><h1>Error</h1><p>\(message)</p></body>
+        </html>
+        """
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        stopWatching()
+        AppDelegate.shared.windows.removeAll { $0 === self }
+    }
+}
+
+// MARK: - App Delegate
+class AppDelegate: NSObject, NSApplicationDelegate {
+    static var shared: AppDelegate!
+    var windows: [DocumentWindow] = []
+    var pendingURLs: [URL] = []
+    var isReady = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self
+        setupMenus()
+        isReady = true
+
+        // Load pending files if opened via file association
+        if !pendingURLs.isEmpty {
+            for url in pendingURLs {
+                openFile(url)
+            }
+            pendingURLs.removeAll()
+        } else {
+            // Check for file argument
+            let args = CommandLine.arguments
+            if args.count > 1 {
+                openFile(URL(fileURLWithPath: args[1]))
+            } else {
+                createNewWindow().showWelcome()
+            }
+        }
+
+        // Ask to be default (only once, on first launch)
+        DispatchQueue.main.async {
+            DefaultAppHandler.promptIfNeeded()
+        }
+    }
+
+    func createNewWindow() -> DocumentWindow {
+        let docWindow = DocumentWindow()
+        windows.append(docWindow)
+        return docWindow
+    }
+
+    func openFile(_ url: URL) {
+        let docWindow = createNewWindow()
+        docWindow.loadFile(url)
     }
 
     func setupMenus() {
@@ -424,112 +552,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func openDocument() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.init(filenameExtension: "md")!, .init(filenameExtension: "markdown")!, .plainText]
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
 
-        if panel.runModal() == .OK, let url = panel.url {
-            loadFile(url)
+        if panel.runModal() == .OK {
+            for url in panel.urls {
+                openFile(url)
+            }
         }
     }
 
     @objc func reloadDocument() {
-        if let file = currentFile {
-            loadFile(file)
+        // Reload the front-most window
+        if let keyWindow = NSApp.keyWindow,
+           let docWindow = windows.first(where: { $0.window === keyWindow }) {
+            docWindow.reload()
         }
-    }
-
-    func loadFile(_ url: URL) {
-        currentFile = url
-        window.title = "MDView - \(url.lastPathComponent)"
-
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
-            showError("Could not read file")
-            return
-        }
-
-        let html = MarkdownParser.toHTML(content)
-        let fullHTML = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <meta charset="utf-8">
-        <style>\(css)</style>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-        </head>
-        <body>\(html)</body>
-        <script>hljs.highlightAll();</script>
-        </html>
-        """
-
-        webView.loadHTMLString(fullHTML, baseURL: url.deletingLastPathComponent())
-        watchFile(url)
-    }
-
-    func watchFile(_ url: URL) {
-        // Stop any existing watcher
-        fileWatcher?.cancel()
-        fileWatcher = nil
-
-        let fd = open(url.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd,
-            eventMask: [.write, .rename],
-            queue: .main
-        )
-
-        source.setEventHandler { [weak self] in
-            // Small delay to let file finish writing
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                self?.reloadDocument()
-            }
-        }
-
-        source.setCancelHandler {
-            close(fd)
-        }
-
-        source.resume()
-        fileWatcher = source
-    }
-
-    func showWelcome() {
-        let html = """
-        <!DOCTYPE html>
-        <html>
-        <head><meta charset="utf-8"><style>\(css)</style></head>
-        <body>
-        <h1>MDView</h1>
-        <p>A lightweight Markdown viewer.</p>
-        <p>Use <strong>File → Open</strong> or <code>Cmd+O</code> to open a Markdown file.</p>
-        <p>You can also open files from the command line:</p>
-        <pre><code>mdview path/to/file.md</code></pre>
-        </body>
-        </html>
-        """
-        webView.loadHTMLString(html, baseURL: nil)
-    }
-
-    func showError(_ message: String) {
-        let html = """
-        <!DOCTYPE html>
-        <html>
-        <head><meta charset="utf-8"><style>\(css)</style></head>
-        <body><h1>Error</h1><p>\(message)</p></body>
-        </html>
-        """
-        webView.loadHTMLString(html, baseURL: nil)
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        guard let url = urls.first else { return }
         if isReady {
-            loadFile(url)
+            for url in urls {
+                openFile(url)
+            }
         } else {
-            pendingURL = url
+            pendingURLs.append(contentsOf: urls)
         }
     }
 
