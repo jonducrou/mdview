@@ -4,12 +4,22 @@ import PackageDescription
 let package = Package(
     name: "MDView",
     platforms: [.macOS(.v12)],
+    products: [
+        .library(name: "MarkdownParserLib", targets: ["MarkdownParserLib"])
+    ],
     dependencies: [],
     targets: [
+        .target(
+            name: "MarkdownParserLib",
+            dependencies: []
+        ),
         .executableTarget(
             name: "MDView",
-            dependencies: [],
-            resources: [.process("Resources")]
+            dependencies: ["MarkdownParserLib"]
+        ),
+        .testTarget(
+            name: "MarkdownParserTests",
+            dependencies: ["MarkdownParserLib"]
         )
     ]
 )
