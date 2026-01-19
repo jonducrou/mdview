@@ -287,6 +287,9 @@ class DocumentWindow: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         stopWatching()
+        webView.stopLoading()
+        webView.removeFromSuperview()
+        window.delegate = nil
         AppDelegate.shared.windows.removeAll { $0 === self }
     }
 }
@@ -332,6 +335,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func openFile(_ url: URL) {
+        // Check if file is already open - bring existing window to front
+        if let existingWindow = windows.first(where: { $0.currentFile == url }) {
+            existingWindow.window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         let docWindow = createNewWindow()
         docWindow.loadFile(url)
     }
