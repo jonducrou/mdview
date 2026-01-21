@@ -229,8 +229,8 @@ class DocumentWindow: NSObject, NSWindowDelegate {
         source.setEventHandler { [weak self] in
             guard let self = self, let file = self.currentFile else { return }
             // Debounce: wait for file to finish writing
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                self.loadFile(file)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.loadFile(file)
             }
         }
 
