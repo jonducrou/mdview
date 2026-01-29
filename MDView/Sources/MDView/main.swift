@@ -417,9 +417,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Clean up all file watchers before exit
+        // Clean up all windows properly before exit to prevent use-after-free
+        // during autorelease pool drain. Must stop WebViews and remove delegates
+        // before releasing DocumentWindow objects.
         for docWindow in windows {
             docWindow.stopWatching()
+            docWindow.webView.stopLoading()
+            docWindow.webView.navigationDelegate = nil
+            docWindow.webView.uiDelegate = nil
+            docWindow.webView.removeFromSuperview()
+            docWindow.window.delegate = nil
         }
         windows.removeAll()
     }
