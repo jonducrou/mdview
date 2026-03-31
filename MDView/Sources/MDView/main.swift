@@ -146,6 +146,7 @@ class DocumentWindow: NSObject, NSWindowDelegate {
     var currentFile: URL?
     var fileDescriptor: Int32 = -1
     var fileWatcher: DispatchSourceFileSystemObject?
+    var tempHTMLFile: URL?
 
     override init() {
         let screenRect = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -207,7 +208,13 @@ class DocumentWindow: NSObject, NSWindowDelegate {
         </html>
         """
 
-        webView.loadHTMLString(fullHTML, baseURL: url.deletingLastPathComponent())
+        // Write HTML to a temp file in the same directory so loadFileURL can access local images
+        let parentDir = url.deletingLastPathComponent()
+        let tempFile = parentDir.appendingPathComponent(".mdview_\(ProcessInfo.processInfo.processIdentifier)_\(ObjectIdentifier(self).hashValue).html")
+        cleanupTempFile()
+        try? fullHTML.write(to: tempFile, atomically: true, encoding: .utf8)
+        tempHTMLFile = tempFile
+        webView.loadFileURL(tempFile, allowingReadAccessTo: parentDir)
         startWatching(url)
     }
 
@@ -251,6 +258,13 @@ class DocumentWindow: NSObject, NSWindowDelegate {
         fileDescriptor = -1
     }
 
+    func cleanupTempFile() {
+        if let tempFile = tempHTMLFile {
+            try? FileManager.default.removeItem(at: tempFile)
+            tempHTMLFile = nil
+        }
+    }
+
     func reload() {
         if let file = currentFile {
             loadFile(file)
@@ -287,6 +301,7 @@ class DocumentWindow: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         stopWatching()
+        cleanupTempFile()
         webView.stopLoading()
         webView.removeFromSuperview()
         window.delegate = nil
