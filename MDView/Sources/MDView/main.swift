@@ -303,9 +303,14 @@ class DocumentWindow: NSObject, NSWindowDelegate {
         stopWatching()
         cleanupTempFile()
         webView.stopLoading()
-        webView.removeFromSuperview()
+        webView.loadHTMLString("", baseURL: nil)
         window.delegate = nil
-        AppDelegate.shared.windows.removeAll { $0 === self }
+        // Defer removal to let CoreAnimation finish pending window animations
+        // before this DocumentWindow is deallocated
+        DispatchQueue.main.async { [self] in
+            self.webView.removeFromSuperview()
+            AppDelegate.shared.windows.removeAll { $0 === self }
+        }
     }
 }
 
