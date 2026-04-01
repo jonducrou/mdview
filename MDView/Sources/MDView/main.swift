@@ -140,21 +140,19 @@ tr:nth-child(even) { background: #f6f8fa; }
 """
 
 // MARK: - Document Window (supports multiple windows)
-class DocumentWindow: NSObject, NSWindowDelegate {
-    let window: NSWindow
+class DocumentWindow: NSWindowController, NSWindowDelegate {
     let webView: WKWebView
     var currentFile: URL?
     var fileDescriptor: Int32 = -1
     var fileWatcher: DispatchSourceFileSystemObject?
     var tempHTMLFile: URL?
 
-    override init() {
+    init(windowOffset: Int) {
         let screenRect = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
         let windowWidth: CGFloat = min(1000, screenRect.width * 0.7)
         let windowHeight: CGFloat = min(800, screenRect.height * 0.8)
 
-        // Offset each new window slightly
-        let offset = CGFloat(AppDelegate.shared.windows.count * 30)
+        let offset = CGFloat(windowOffset * 30)
         let windowRect = NSRect(
             x: (screenRect.width - windowWidth) / 2 + screenRect.minX + offset,
             y: (screenRect.height - windowHeight) / 2 + screenRect.minY - offset,
@@ -162,30 +160,36 @@ class DocumentWindow: NSObject, NSWindowDelegate {
             height: windowHeight
         )
 
-        window = NSWindow(
+        let win = NSWindow(
             contentRect: windowRect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "MDView"
-        window.minSize = NSSize(width: 400, height: 300)
+        win.title = "MDView"
+        win.minSize = NSSize(width: 400, height: 300)
+        // Disable window transform animations to prevent _NSWindowTransformAnimation
+        // from capturing stale references to WKWebView layers after sleep/wake
+        win.animationBehavior = .none
 
         let config = WKWebViewConfiguration()
         webView = WKWebView(frame: .zero, configuration: config)
-        webView.autoresizingMask = [.width, .height]
 
-        super.init()
+        super.init(window: win)
 
-        window.delegate = self
-        window.contentView?.addSubview(webView)
-        webView.frame = window.contentView!.bounds
-        window.makeKeyAndOrderFront(nil)
+        win.delegate = self
+        // Set WKWebView as contentView directly for simpler view hierarchy
+        win.contentView = webView
+        win.makeKeyAndOrderFront(nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not supported")
     }
 
     func loadFile(_ url: URL) {
         currentFile = url
-        window.title = "MDView - \(url.lastPathComponent)"
+        window?.title = "MDView - \(url.lastPathComponent)"
 
         guard let content = try? String(contentsOf: url, encoding: .utf8) else {
             showError("Could not read file")
@@ -304,11 +308,9 @@ class DocumentWindow: NSObject, NSWindowDelegate {
         cleanupTempFile()
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
-        window.delegate = nil
-        // Defer removal to let CoreAnimation finish pending window animations
-        // before this DocumentWindow is deallocated
+        window?.delegate = nil
+        // Defer removal so NSWindowController and CoreAnimation can finish cleanup
         DispatchQueue.main.async { [self] in
-            self.webView.removeFromSuperview()
             AppDelegate.shared.windows.removeAll { $0 === self }
         }
     }
@@ -349,7 +351,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func createNewWindow() -> DocumentWindow {
-        let docWindow = DocumentWindow()
+        let docWindow = DocumentWindow(windowOffset: windows.count)
         windows.append(docWindow)
         return docWindow
     }
@@ -357,7 +359,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func openFile(_ url: URL) {
         // Check if file is already open - bring existing window to front
         if let existingWindow = windows.first(where: { $0.currentFile == url }) {
-            existingWindow.window.makeKeyAndOrderFront(nil)
+            existingWindow.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
@@ -417,7 +419,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func reloadDocument() {
         // Reload the front-most window
         if let keyWindow = NSApp.keyWindow,
-           let docWindow = windows.first(where: { $0.window === keyWindow }) {
+           let docWindow = windows.first(where: { $0.window === keyWindow as NSWindow }) {
             docWindow.reload()
         }
     }
@@ -437,16 +439,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Clean up all windows properly before exit to prevent use-after-free
-        // during autorelease pool drain. Must stop WebViews and remove delegates
-        // before releasing DocumentWindow objects.
         for docWindow in windows {
             docWindow.stopWatching()
+            docWindow.cleanupTempFile()
             docWindow.webView.stopLoading()
             docWindow.webView.navigationDelegate = nil
             docWindow.webView.uiDelegate = nil
-            docWindow.webView.removeFromSuperview()
-            docWindow.window.delegate = nil
+            docWindow.window?.delegate = nil
         }
         windows.removeAll()
     }
