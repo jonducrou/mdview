@@ -383,6 +383,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let fileMenuItem = NSMenuItem()
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(withTitle: "Open...", action: #selector(openDocument), keyEquivalent: "o")
+        fileMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         fileMenu.addItem(withTitle: "Reload", action: #selector(reloadDocument), keyEquivalent: "r")
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
