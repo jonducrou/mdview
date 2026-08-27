@@ -9,6 +9,7 @@ A lightweight, fast Markdown viewer for macOS.
 - Dark mode support
 - Fast startup and rendering
 - Auto-reload on file save
+- Print via Preview (File → Print…, Cmd+P)
 - No external dependencies
 
 ## Installation

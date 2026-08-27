@@ -59,86 +59,6 @@ struct DefaultAppHandler {
     }
 }
 
-// MARK: - CSS Styles
-let css = """
-:root {
-    color-scheme: light dark;
-}
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    font-size: 15px;
-    line-height: 1.6;
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 20px 40px;
-    color: #24292f;
-    background: #ffffff;
-}
-@media (prefers-color-scheme: dark) {
-    body { background: #0d1117; color: #c9d1d9; }
-    a { color: #58a6ff; }
-    code { background: #161b22; }
-    pre { background: #161b22; border-color: #30363d; }
-    blockquote { border-color: #30363d; color: #8b949e; }
-    hr { background: #30363d; }
-    h1, h2 { border-color: #30363d; }
-}
-h1, h2, h3, h4, h5, h6 { margin-top: 24px; margin-bottom: 16px; font-weight: 600; }
-h1 { font-size: 2em; padding-bottom: 0.3em; border-bottom: 1px solid #d0d7de; }
-h2 { font-size: 1.5em; padding-bottom: 0.3em; border-bottom: 1px solid #d0d7de; }
-h3 { font-size: 1.25em; }
-p { margin: 0 0 16px 0; }
-a { color: #0969da; text-decoration: none; }
-a:hover { text-decoration: underline; }
-code {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-size: 85%;
-    background: #f6f8fa;
-    padding: 0.2em 0.4em;
-    border-radius: 6px;
-}
-pre {
-    background: #f6f8fa;
-    padding: 16px;
-    border-radius: 6px;
-    overflow-x: auto;
-    border: 1px solid #d0d7de;
-}
-pre code { background: none; padding: 0; font-size: 85%; }
-blockquote {
-    margin: 0 0 16px 0;
-    padding: 0 1em;
-    border-left: 4px solid #d0d7de;
-    color: #57606a;
-}
-ul, ol { padding-left: 2em; margin: 0 0 16px 0; }
-li { margin: 4px 0; }
-hr { height: 2px; background: #d0d7de; border: 0; margin: 24px 0; }
-img { max-width: 100%; height: auto; }
-table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 0 0 16px 0;
-    overflow-x: auto;
-    display: block;
-}
-th, td {
-    border: 1px solid #d0d7de;
-    padding: 8px 12px;
-    text-align: left;
-}
-th {
-    background: #f6f8fa;
-    font-weight: 600;
-}
-tr:nth-child(even) { background: #f6f8fa; }
-@media (prefers-color-scheme: dark) {
-    th, td { border-color: #30363d; }
-    th { background: #161b22; }
-    tr:nth-child(even) { background: #161b22; }
-}
-"""
-
 // MARK: - Document Window (supports multiple windows)
 class DocumentWindow: NSObject, NSWindowDelegate {
     let window: NSWindow
@@ -146,6 +66,7 @@ class DocumentWindow: NSObject, NSWindowDelegate {
     var currentFile: URL?
     var fileDescriptor: Int32 = -1
     var fileWatcher: DispatchSourceFileSystemObject?
+    var printRenderer: PrintRenderer?
 
     override init() {
         let screenRect = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -191,21 +112,7 @@ class DocumentWindow: NSObject, NSWindowDelegate {
             return
         }
 
-        let html = MarkdownParser.toHTML(content)
-        let fullHTML = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <meta charset="utf-8">
-        <style>\(css)</style>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-        </head>
-        <body>\(html)</body>
-        <script>hljs.highlightAll();</script>
-        </html>
-        """
+        let fullHTML = HTMLDocument.makePage(markdown: content)
 
         webView.loadHTMLString(fullHTML, baseURL: url.deletingLastPathComponent())
         startWatching(url)
@@ -257,11 +164,40 @@ class DocumentWindow: NSObject, NSWindowDelegate {
         }
     }
 
+    func printDocument() {
+        guard let file = currentFile else { return }
+
+        guard let content = try? String(contentsOf: file, encoding: .utf8) else {
+            let alert = NSAlert()
+            alert.messageText = "Print Failed"
+            alert.informativeText = "Could not read file."
+            alert.runModal()
+            return
+        }
+
+        let html = HTMLDocument.makePrintPage(markdown: content)
+        let parentDir = file.deletingLastPathComponent()
+        let tempFile = parentDir.appendingPathComponent(".mdview_print_\(ProcessInfo.processInfo.processIdentifier)_\(ObjectIdentifier(self).hashValue).html")
+        guard let _ = try? html.write(to: tempFile, atomically: true, encoding: .utf8) else {
+            let alert = NSAlert()
+            alert.messageText = "Print Failed"
+            alert.informativeText = "Could not write temporary file."
+            alert.runModal()
+            return
+        }
+
+        let pdfURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("MDView-\(file.deletingPathExtension().lastPathComponent).pdf")
+        printRenderer = PrintRenderer(htmlFile: tempFile, readAccess: parentDir, pdfURL: pdfURL) { [weak self] in
+            self?.printRenderer = nil
+        }
+    }
+
     func showWelcome() {
         let html = """
         <!DOCTYPE html>
         <html>
-        <head><meta charset="utf-8"><style>\(css)</style></head>
+        <head><meta charset="utf-8"><style>\(HTMLDocument.lightCSS)</style></head>
         <body>
         <h1>MDView</h1>
         <p>A lightweight Markdown viewer.</p>
@@ -278,7 +214,7 @@ class DocumentWindow: NSObject, NSWindowDelegate {
         let html = """
         <!DOCTYPE html>
         <html>
-        <head><meta charset="utf-8"><style>\(css)</style></head>
+        <head><meta charset="utf-8"><style>\(HTMLDocument.lightCSS)</style></head>
         <body><h1>Error</h1><p>\(message)</p></body>
         </html>
         """
@@ -291,6 +227,69 @@ class DocumentWindow: NSObject, NSWindowDelegate {
         webView.removeFromSuperview()
         window.delegate = nil
         AppDelegate.shared.windows.removeAll { $0 === self }
+    }
+}
+
+// MARK: - Print Renderer (offscreen WKWebView -> PDF -> Preview)
+class PrintRenderer: NSObject, WKNavigationDelegate {
+    private let webView: WKWebView
+    private let tempHTMLFile: URL
+    private let pdfURL: URL
+    private let done: () -> Void
+
+    init(htmlFile: URL, readAccess: URL, pdfURL: URL, done: @escaping () -> Void) {
+        self.tempHTMLFile = htmlFile
+        self.pdfURL = pdfURL
+        self.done = done
+        self.webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 816, height: 1056))
+        super.init()
+        webView.navigationDelegate = self
+        webView.loadFileURL(htmlFile, allowingReadAccessTo: readAccess)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: tempHTMLFile)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        webView.createPDF { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let data):
+                do {
+                    try data.write(to: self.pdfURL, options: .atomic)
+                    NSWorkspace.shared.open(self.pdfURL)
+                } catch {
+                    self.showAlert("Could not save PDF file.")
+                }
+            case .failure:
+                self.showAlert("Could not generate PDF.")
+            }
+            self.finish()
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        showAlert("Could not render document for printing.")
+        finish()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        showAlert("Could not render document for printing.")
+        finish()
+    }
+
+    private func showAlert(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Print Failed"
+        alert.informativeText = message
+        alert.runModal()
+    }
+
+    private func finish() {
+        webView.navigationDelegate = nil
+        webView.stopLoading()
+        done()
     }
 }
 
@@ -362,6 +361,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(withTitle: "Open...", action: #selector(openDocument), keyEquivalent: "o")
         fileMenu.addItem(withTitle: "Reload", action: #selector(reloadDocument), keyEquivalent: "r")
+        fileMenu.addItem(NSMenuItem.separator())
+        fileMenu.addItem(withTitle: "Print...", action: #selector(printDocument), keyEquivalent: "p")
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
 
@@ -400,6 +401,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
            let docWindow = windows.first(where: { $0.window === keyWindow }) {
             docWindow.reload()
         }
+    }
+
+    @objc func printDocument() {
+        guard let keyWindow = NSApp.keyWindow,
+              let docWindow = windows.first(where: { $0.window === keyWindow }),
+              docWindow.currentFile != nil else {
+            let alert = NSAlert()
+            alert.messageText = "Nothing to Print"
+            alert.informativeText = "Open a Markdown file first."
+            alert.runModal()
+            return
+        }
+        docWindow.printDocument()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
