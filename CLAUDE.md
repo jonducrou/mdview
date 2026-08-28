@@ -21,4 +21,6 @@ A lightweight macOS Markdown viewer built with Swift/AppKit/WebKit.
   `lightCSS` / `darkCSS` / `screenCSS`, assembled via
   `HTMLDocument.makePage` / `makePrintPage`.
 - Printing renders an offscreen WKWebView, captures it with `createPDF`,
-  and opens the PDF in Preview (File → Print…, Cmd+P).
+  slices the resulting single tall page into US Letter pages with
+  `MarkdownParserLib/PDFPaginator.swift`, and opens the PDF in Preview
+  (File → Print…, Cmd+P).

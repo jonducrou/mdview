@@ -257,7 +257,10 @@ class PrintRenderer: NSObject, WKNavigationDelegate {
             switch result {
             case .success(let data):
                 do {
-                    try data.write(to: self.pdfURL, options: .atomic)
+                    // createPDF returns one tall single page; slice it into
+                    // letter pages so it prints without Preview scaling it down.
+                    let output = PDFPaginator.paginate(pdfData: data) ?? data
+                    try output.write(to: self.pdfURL, options: .atomic)
                     NSWorkspace.shared.open(self.pdfURL)
                 } catch {
                     self.showAlert("Could not save PDF file.")
