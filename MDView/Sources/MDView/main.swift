@@ -97,6 +97,10 @@ class DocumentWindow: NSObject, NSWindowDelegate {
 
         super.init()
 
+        // DocumentWindow owns the window (retained in AppDelegate.windows);
+        // AppKit's default release-on-close would over-release it, leaving a
+        // dangling pointer that the close animation's dealloc crashes on.
+        window.isReleasedWhenClosed = false
         window.delegate = self
         window.contentView?.addSubview(webView)
         webView.frame = window.contentView!.bounds
