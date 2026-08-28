@@ -13,6 +13,7 @@ bundle: build
 	mkdir -p $(BUNDLE)/Contents/Resources
 	cp $(BUILD_DIR)/MDView $(BUNDLE)/Contents/MacOS/
 	cp Info.plist $(BUNDLE)/Contents/
+	cp AppIcon.icns $(BUNDLE)/Contents/Resources/
 	@echo "Created $(BUNDLE)"
 
 install: bundle
